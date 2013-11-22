@@ -6954,7 +6954,7 @@ vboxCallbackOnMachineStateChange(IVirtualBoxCallback *pThis ATTRIBUTE_UNUSED,
 
         dom = vboxDomainLookupByUUID(g_pVBoxGlobalData->conn, uuid);
         if (dom) {
-            virDomainEventPtr ev;
+            virObjectEventPtr ev;
 
             if (state == MachineState_Starting) {
                 event  = VIR_DOMAIN_EVENT_STARTED;
@@ -7073,7 +7073,7 @@ vboxCallbackOnMachineRegistered(IVirtualBoxCallback *pThis ATTRIBUTE_UNUSED,
 
         dom = vboxDomainLookupByUUID(g_pVBoxGlobalData->conn, uuid);
         if (dom) {
-            virDomainEventPtr ev;
+            virObjectEventPtr ev;
 
             /* CURRENT LIMITATION: we never get the VIR_DOMAIN_EVENT_UNDEFINED
              * event because the when the machine is de-registered the call
