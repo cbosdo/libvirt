@@ -68,6 +68,7 @@
 #include "virstring.h"
 #include "virutil.h"
 #include "virtypedparam.h"
+#include "object_event.h"
 
 #ifdef WITH_TEST
 # include "test/test_driver.h"
@@ -19164,6 +19165,130 @@ virConnectDomainEventDeregisterAny(virConnectPtr conn,
     if ((conn->driver) && (conn->driver->connectDomainEventDeregisterAny)) {
         int ret;
         ret = conn->driver->connectDomainEventDeregisterAny(conn, callbackID);
+        if (ret < 0)
+            goto error;
+        return ret;
+    }
+
+    virLibConnError(VIR_ERR_NO_SUPPORT, __FUNCTION__);
+error:
+    virDispatchError(conn);
+    return -1;
+}
+
+/**
+ * virConnectNetworkEventRegisterAny:
+ * @conn: pointer to the connection
+ * @net: pointer to the network
+ * @eventID: the event type to receive
+ * @cb: callback to the function handling network events
+ * @opaque: opaque data to pass on to the callback
+ * @freecb: optional function to deallocate opaque when not used anymore
+ *
+ * Adds a callback to receive notifications of arbitrary network events
+ * occurring on a network.
+ *
+ * If net is NULL, then events will be monitored for any network. If net
+ * is non-NULL, then only the specific network will be monitored
+ *
+ * Most types of event have a callback providing a custom set of parameters
+ * for the event. When registering an event, it is thus necessary to use
+ * the VIR_NETWORK_EVENT_CALLBACK() macro to cast the supplied function pointer
+ * to match the signature of this method.
+ *
+ * The virNetworkPtr object handle passed into the callback upon delivery
+ * of an event is only valid for the duration of execution of the callback.
+ * If the callback wishes to keep the network object after the callback
+ * returns, it shall take a reference to it, by calling virNetworkRef.
+ * The reference can be released once the object is no longer required
+ * by calling virNetworkFree.
+ *
+ * The return value from this method is a positive integer identifier
+ * for the callback. To unregister a callback, this callback ID should
+ * be passed to the virNetworkEventUnregisterAny method
+ *
+ * Returns a callback identifier on success, -1 on failure
+ */
+int
+virConnectNetworkEventRegisterAny(virConnectPtr conn,
+                                  virNetworkPtr net,
+                                  int eventID,
+                                  virConnectNetworkEventGenericCallback cb,
+                                  void *opaque,
+                                  virFreeCallback freecb)
+{
+    VIR_DEBUG("conn=%p, eventID=%d, cb=%p, opaque=%p, freecb=%p",
+              conn, eventID, cb, opaque, freecb);
+
+    virResetLastError();
+
+    if (!VIR_IS_CONNECT(conn)) {
+        virLibConnError(VIR_ERR_INVALID_CONN, __FUNCTION__);
+        virDispatchError(NULL);
+        return -1;
+    }
+    if (net != NULL &&
+        !(VIR_IS_CONNECTED_NETWORK(net) && net->conn == conn)) {
+        virLibConnError(VIR_ERR_INVALID_CONN, __FUNCTION__);
+        virDispatchError(conn);
+        return -1;
+    }
+    virCheckNonNullArgGoto(cb, error);
+    virCheckNonNegativeArgGoto(eventID, error);
+
+    if (eventID >= VIR_NETWORK_EVENT_ID_LAST) {
+        virReportInvalidArg(eventID,
+                            _("eventID in %s must be less than %d"),
+                            __FUNCTION__, VIR_NETWORK_EVENT_ID_LAST);
+        goto error;
+    }
+
+    if ((conn->networkDriver) && (conn->networkDriver->connectNetworkEventRegisterAny)) {
+        int ret;
+        ret = conn->networkDriver->connectNetworkEventRegisterAny(conn, net,
+                                          (VIR_EVENT_NAMESPACE_NETWORK << 8) +eventID,
+                                          cb, opaque, freecb);
+        if (ret < 0)
+            goto error;
+        return ret;
+    }
+
+    virLibConnError(VIR_ERR_NO_SUPPORT, __FUNCTION__);
+error:
+    virDispatchError(conn);
+    return -1;
+}
+
+/**
+ * virConnectNetworkEventDeregisterAny:
+ * @conn: pointer to the connection
+ * @callbackID: the callback identifier
+ *
+ * Removes an event callback. The callbackID parameter should be the
+ * vaule obtained from a previous virNetworkEventRegisterAny method.
+ *
+ * Returns 0 on success, -1 on failure
+ */
+int
+virConnectNetworkEventDeregisterAny(virConnectPtr conn,
+                                    int callbackID)
+{
+    VIR_DEBUG("conn=%p, callbackID=%d", conn, callbackID);
+
+    virResetLastError();
+
+    if (!VIR_IS_CONNECT(conn)) {
+        virLibConnError(VIR_ERR_INVALID_CONN, __FUNCTION__);
+        virDispatchError(NULL);
+        return -1;
+    }
+    virCheckNonNegativeArgGoto(callbackID, error);
+
+    if ((conn->networkDriver) &&
+            (conn->networkDriver->connectNetworkEventDeregisterAny)) {
+        int ret;
+        ret = conn->networkDriver->connectNetworkEventDeregisterAny(conn,
+                                                                    callbackID);
         if (ret < 0)
             goto error;
         return ret;

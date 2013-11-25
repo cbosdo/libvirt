@@ -621,6 +621,8 @@ virNWFilterVarValueGetSimple;
 
 
 # conf/object_event.h
+virNetworkEventLifecycleNew;
+virNetworkEventStateRegisterID;
 virObjectEventStateDeregisterID;
 virObjectEventStateEventID;
 virObjectEventStateFree;
