@@ -84,6 +84,8 @@ struct _virObjectEventCallback {
 
 
 static virClassPtr virObjectEventClass;
+static virClassPtr virClassForObjectEvent(void);
+
 static virClassPtr virDomainEventClass;
 static virClassPtr virDomainEventLifecycleClass;
 static virClassPtr virDomainEventRTCChangeClass;
@@ -227,7 +229,21 @@ static int virObjectEventOnceInit(void)
                                              sizeof(virObjectEvent),
                                              virObjectEventDispose)))
         return -1;
-    if (!(virDomainEventClass = virClassNew(virObjectEventClass,
+    return 0;
+}
+
+VIR_ONCE_GLOBAL_INIT(virObjectEvent)
+
+virClassPtr virClassForObjectEvent(void)
+{
+    if (virObjectEventInitialize() < 0)
+        return NULL;
+    return virObjectEventClass;
+}
+
+static int virDomainEventsOnceInit(void)
+{
+    if (!(virDomainEventClass = virClassNew(virClassForObjectEvent(),
                                              "virDomainEvent",
                                              sizeof(virDomainEvent),
                                              virDomainEventDispose)))
@@ -295,13 +311,13 @@ static int virObjectEventOnceInit(void)
     return 0;
 }
 
-VIR_ONCE_GLOBAL_INIT(virObjectEvent)
+VIR_ONCE_GLOBAL_INIT(virDomainEvents)
 
 static int virObjectEventGetEventID(void *anyobj)
 {
     virObjectEventPtr obj = anyobj;
 
-    if (!virObjectIsClass(obj, virObjectEventClass)) {
+    if (!virObjectIsClass(obj, virClassForObjectEvent())) {
         VIR_WARN("Object %p (%s) is not a virObjectEvent instance",
                  obj, obj ? virClassName(obj->parent.klass) : "(unknown)");
         return -1;
@@ -958,7 +974,7 @@ virObjectEventPtr virDomainEventLifecycleNew(int id, const char *name,
 {
     virDomainEventLifecyclePtr event;
 
-    if (virObjectEventInitialize() < 0)
+    if (virDomainEventsInitialize() < 0)
         return NULL;
 
     if (!(event = virDomainEventNew(virDomainEventLifecycleClass,
@@ -992,7 +1008,7 @@ virObjectEventPtr virDomainEventLifecycleNewFromDef(virDomainDefPtr def, int typ
 virObjectEventPtr virDomainEventRebootNew(int id, const char *name,
                                           const unsigned char *uuid)
 {
-    if (virObjectEventInitialize() < 0)
+    if (virDomainEventsInitialize() < 0)
         return NULL;
 
     return virDomainEventNew(virDomainEventClass,
@@ -1002,7 +1018,7 @@ virObjectEventPtr virDomainEventRebootNew(int id, const char *name,
 
 virObjectEventPtr virDomainEventRebootNewFromDom(virDomainPtr dom)
 {
-    if (virObjectEventInitialize() < 0)
+    if (virDomainEventsInitialize() < 0)
         return NULL;
 
     return virDomainEventNew(virDomainEventClass,
@@ -1012,7 +1028,7 @@ virObjectEventPtr virDomainEventRebootNewFromDom(virDomainPtr dom)
 
 virObjectEventPtr virDomainEventRebootNewFromObj(virDomainObjPtr obj)
 {
-    if (virObjectEventInitialize() < 0)
+    if (virDomainEventsInitialize() < 0)
         return NULL;
 
     return virDomainEventNew(virDomainEventClass,
@@ -1025,7 +1041,7 @@ virObjectEventPtr virDomainEventRTCChangeNewFromDom(virDomainPtr dom,
 {
     virDomainEventRTCChangePtr ev;
 
-    if (virObjectEventInitialize() < 0)
+    if (virDomainEventsInitialize() < 0)
         return NULL;
 
     if (!(ev = virDomainEventNew(virDomainEventRTCChangeClass,
@@ -1042,7 +1058,7 @@ virObjectEventPtr virDomainEventRTCChangeNewFromObj(virDomainObjPtr obj,
 {
     virDomainEventRTCChangePtr ev;
 
-    if (virObjectEventInitialize() < 0)
+    if (virDomainEventsInitialize() < 0)
         return NULL;
 
     if (!(ev = virDomainEventNew(virDomainEventRTCChangeClass,
@@ -1060,7 +1076,7 @@ virObjectEventPtr virDomainEventWatchdogNewFromDom(virDomainPtr dom, int action)
 {
     virDomainEventWatchdogPtr ev;
 
-    if (virObjectEventInitialize() < 0)
+    if (virDomainEventsInitialize() < 0)
         return NULL;
 
     if (!(ev = virDomainEventNew(virDomainEventWatchdogClass,
@@ -1076,7 +1092,7 @@ virObjectEventPtr virDomainEventWatchdogNewFromObj(virDomainObjPtr obj, int acti
 {
     virDomainEventWatchdogPtr ev;
 
-    if (virObjectEventInitialize() < 0)
+    if (virDomainEventsInitialize() < 0)
         return NULL;
 
     if (!(ev = virDomainEventNew(virDomainEventWatchdogClass,
@@ -1099,7 +1115,7 @@ static virObjectEventPtr virDomainEventIOErrorNewFromDomImpl(int event,
 {
     virDomainEventIOErrorPtr ev;
 
-    if (virObjectEventInitialize() < 0)
+    if (virDomainEventsInitialize() < 0)
         return NULL;
 
     if (!(ev = virDomainEventNew(virDomainEventIOErrorClass, event,
@@ -1126,7 +1142,7 @@ static virObjectEventPtr virDomainEventIOErrorNewFromObjImpl(int event,
 {
     virDomainEventIOErrorPtr ev;
 
-    if (virObjectEventInitialize() < 0)
+    if (virDomainEventsInitialize() < 0)
         return NULL;
 
     if (!(ev = virDomainEventNew(virDomainEventIOErrorClass, event,
@@ -1197,7 +1213,7 @@ virObjectEventPtr virDomainEventGraphicsNewFromDom(virDomainPtr dom,
 {
     virDomainEventGraphicsPtr ev;
 
-    if (virObjectEventInitialize() < 0)
+    if (virDomainEventsInitialize() < 0)
         return NULL;
 
     if (!(ev = virDomainEventNew(virDomainEventGraphicsClass,
@@ -1226,7 +1242,7 @@ virObjectEventPtr virDomainEventGraphicsNewFromObj(virDomainObjPtr obj,
 {
     virDomainEventGraphicsPtr ev;
 
-    if (virObjectEventInitialize() < 0)
+    if (virDomainEventsInitialize() < 0)
         return NULL;
 
     if (!(ev = virDomainEventNew(virDomainEventGraphicsClass,
@@ -1257,7 +1273,7 @@ virObjectEventPtr  virDomainEventBlockJobNew(int id,
 {
     virDomainEventBlockJobPtr ev;
 
-    if (virObjectEventInitialize() < 0)
+    if (virDomainEventsInitialize() < 0)
         return NULL;
 
     if (!(ev = virDomainEventNew(virDomainEventBlockJobClass,
@@ -1297,7 +1313,7 @@ virObjectEventPtr virDomainEventControlErrorNewFromDom(virDomainPtr dom)
 {
     virObjectEventPtr ev;
 
-    if (virObjectEventInitialize() < 0)
+    if (virDomainEventsInitialize() < 0)
         return NULL;
 
     if (!(ev = virDomainEventNew(virDomainEventClass,
@@ -1312,7 +1328,7 @@ virObjectEventPtr virDomainEventControlErrorNewFromObj(virDomainObjPtr obj)
 {
     virObjectEventPtr ev;
 
-    if (virObjectEventInitialize() < 0)
+    if (virDomainEventsInitialize() < 0)
         return NULL;
 
     if (!(ev = virDomainEventNew(virDomainEventClass,
@@ -1332,7 +1348,7 @@ virObjectEventPtr virDomainEventDiskChangeNew(int id, const char *name,
 {
     virDomainEventDiskChangePtr ev;
 
-    if (virObjectEventInitialize() < 0)
+    if (virDomainEventsInitialize() < 0)
         return NULL;
 
     if (!(ev = virDomainEventNew(virDomainEventDiskChangeClass,
@@ -1388,7 +1404,7 @@ virDomainEventTrayChangeNew(int id, const char *name,
 {
     virDomainEventTrayChangePtr ev;
 
-    if (virObjectEventInitialize() < 0)
+    if (virDomainEventsInitialize() < 0)
         return NULL;
 
     if (!(ev = virDomainEventNew(virDomainEventTrayChangeClass,
@@ -1433,7 +1449,7 @@ virDomainEventPMWakeupNew(int id, const char *name,
 {
     virObjectEventPtr ev;
 
-    if (virObjectEventInitialize() < 0)
+    if (virDomainEventsInitialize() < 0)
         return NULL;
 
     if (!(ev = virDomainEventNew(virDomainEventClass,
@@ -1464,7 +1480,7 @@ virDomainEventPMSuspendNew(int id, const char *name,
 {
     virObjectEventPtr ev;
 
-    if (virObjectEventInitialize() < 0)
+    if (virDomainEventsInitialize() < 0)
         return NULL;
 
     if (!(ev = virDomainEventNew(virDomainEventClass,
@@ -1495,7 +1511,7 @@ virDomainEventPMSuspendDiskNew(int id, const char *name,
 {
     virObjectEventPtr ev;
 
-    if (virObjectEventInitialize() < 0)
+    if (virDomainEventsInitialize() < 0)
         return NULL;
 
     if (!(ev = virDomainEventNew(virDomainEventClass,
@@ -1524,7 +1540,7 @@ virObjectEventPtr virDomainEventBalloonChangeNewFromDom(virDomainPtr dom,
 {
     virDomainEventBalloonChangePtr ev;
 
-    if (virObjectEventInitialize() < 0)
+    if (virDomainEventsInitialize() < 0)
         return NULL;
 
     if (!(ev = virDomainEventNew(virDomainEventBalloonChangeClass,
@@ -1541,7 +1557,7 @@ virObjectEventPtr virDomainEventBalloonChangeNewFromObj(virDomainObjPtr obj,
 {
     virDomainEventBalloonChangePtr ev;
 
-    if (virObjectEventInitialize() < 0)
+    if (virDomainEventsInitialize() < 0)
         return NULL;
 
     if (!(ev = virDomainEventNew(virDomainEventBalloonChangeClass,
@@ -1561,7 +1577,7 @@ static virObjectEventPtr virDomainEventDeviceRemovedNew(int id,
 {
     virDomainEventDeviceRemovedPtr ev;
 
-    if (virObjectEventInitialize() < 0)
+    if (virDomainEventsInitialize() < 0)
         return NULL;
 
     if (!(ev = virDomainEventNew(virDomainEventDeviceRemovedClass,
