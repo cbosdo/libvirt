@@ -1309,6 +1309,12 @@ if WITH_LXC
 noinst_LTLIBRARIES += libvirt_driver_lxc_impl.la
 libvirt_driver_lxc_la_SOURCES =
 libvirt_driver_lxc_la_LIBADD = libvirt_driver_lxc_impl.la
+if WITH_CRIU
+criu_LTLIBRARIES = libvirt-lxc-criu.la
+criudir=$(libdir)/libvirt/criu
+libvirt_lxc_criu_la_SOURCES = lxc/lxc_criu_plugin.c
+libvirt_lxc_criu_la_CFLAGS = $(CRIU_CFLAGS)
+endif WITH_CRIU
 if WITH_DRIVER_MODULES
 mod_LTLIBRARIES += libvirt_driver_lxc.la
 libvirt_driver_lxc_la_LIBADD += ../gnulib/lib/libgnu.la
