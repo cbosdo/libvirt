@@ -45,6 +45,7 @@
 #include "lxc_domain.h"
 #include "lxc_driver.h"
 #include "lxc_native.h"
+#include "lxc_migration.h"
 #include "lxc_process.h"
 #include "viralloc.h"
 #include "virnetdevbridge.h"
@@ -1779,6 +1780,7 @@ lxcConnectSupportsFeature(virConnectPtr conn, int feature)
 
     switch (feature) {
         case VIR_DRV_FEATURE_TYPED_PARAM_STRING:
+        case VIR_DRV_FEATURE_MIGRATION_V3:
             return 1;
         default:
             return 0;
@@ -5768,6 +5770,126 @@ lxcDomainHasManagedSaveImage(virDomainPtr dom, unsigned int flags)
     return ret;
 }
 
+/*******************************************************************
+ * Migration Protocol Version 3
+ *******************************************************************/
+
+static char *
+lxcDomainMigrateBegin3(virDomainPtr domain,
+                       const char *xmlin,
+                       char **cookieout,
+                       int *cookieoutlen,
+                       unsigned long flags,
+                       const char *dname,
+                       unsigned long resource ATTRIBUTE_UNUSED)
+{
+    virDomainObjPtr vm;
+
+    virCheckFlags(LXC_MIGRATION_FLAGS, NULL);
+
+    if (!(vm = lxcDomObjFromDomain(domain)))
+        return NULL;
+
+    if (virDomainMigrateBegin3EnsureACL(domain->conn, vm->def) < 0) {
+        virDomainObjEndAPI(&vm);
+        return NULL;
+    }
+
+    return lxcMigrationBegin(domain->conn, vm, xmlin, cookieout, cookieoutlen,
+                             flags, dname);
+}
+
+
+static int
+lxcDomainMigratePrepare3(virConnectPtr dconn,
+                         const char *cookiein,
+                         int cookieinlen,
+                         char **cookieout,
+                         int *cookieoutlen,
+                         const char *uri_in,
+                         char **uri_out,
+                         unsigned long flags,
+                         const char *dname,
+                         unsigned long resource ATTRIBUTE_UNUSED,
+                         const char *dom_xml)
+{
+    virLXCDriverPtr driver = dconn->privateData;
+    virDomainDefPtr def = NULL;
+    char *origname = NULL;
+    int ret = -1;
+
+    virCheckFlags(LXC_MIGRATION_FLAGS, -1);
+
+    if (!(def = lxcMigrationPrepareDef(driver, dom_xml, dname, &origname)))
+        goto cleanup;
+
+    if (virDomainMigratePrepare3EnsureACL(dconn, def) < 0)
+        goto cleanup;
+
+    ret = lxcMigrationPrepare(driver, dconn,
+                              cookiein, cookieinlen,
+                              cookieout, cookieoutlen,
+                              uri_in, uri_out,
+                              &def, origname, flags);
+
+ cleanup:
+    VIR_FREE(origname);
+    virDomainDefFree(def);
+    return ret;
+}
+
+static int
+lxcDomainMigratePrepareTunnel3(virConnectPtr dconn,
+                               virStreamPtr st,
+                               const char *cookiein,
+                               int cookieinlen,
+                               char **cookieout,
+                               int *cookieoutlen,
+                               unsigned long flags,
+                               const char *dname,
+                               unsigned long resource ATTRIBUTE_UNUSED,
+                               const char *dom_xml)
+{
+}
+
+static int
+lxcDomainMigratePerform3(virDomainPtr dom,
+                         const char *xmlin,
+                         const char *cookiein,
+                         int cookieinlen,
+                         char **cookieout,
+                         int *cookieoutlen,
+                         const char *dconnuri,
+                         const char *uri,
+                         unsigned long flags,
+                         const char *dname,
+                         unsigned long resource)
+{
+}
+
+static virDomainPtr
+lxcDomainMigrateFinish3(virConnectPtr dconn,
+                        const char *dname,
+                        const char *cookiein,
+                        int cookieinlen,
+                        char **cookieout,
+                        int *cookieoutlen,
+                        const char *dconnuri ATTRIBUTE_UNUSED,
+                        const char *uri ATTRIBUTE_UNUSED,
+                        unsigned long flags,
+                        int cancelled)
+{
+}
+
+static int
+lxcDomainMigrateConfirm3(virDomainPtr domain,
+                         const char *cookiein,
+                         int cookieinlen,
+                         unsigned long flags,
+                         int cancelled)
+{
+}
+
 
 /* Function Tables */
 static virHypervisorDriver lxcHypervisorDriver = {
@@ -5862,6 +5984,12 @@ static virHypervisorDriver lxcHypervisorDriver = {
     .nodeGetFreePages = lxcNodeGetFreePages, /* 1.2.6 */
     .nodeAllocPages = lxcNodeAllocPages, /* 1.2.9 */
     .domainHasManagedSaveImage = lxcDomainHasManagedSaveImage, /* 1.2.13 */
+    .domainMigrateBegin3 = lxcDomainMigrateBegin3, /* 1.2.22 */
+    .domainMigratePrepare3 = lxcDomainMigratePrepare3, /* 1.2.22 */
+    .domainMigratePrepareTunnel3 = lxcDomainMigratePrepareTunnel3, /* 1.2.22 */
+    .domainMigratePerform3 = lxcDomainMigratePerform3, /* 1.2.22 */
+    .domainMigrateFinish3 = lxcDomainMigrateFinish3, /* 1.2.22 */
+    .domainMigrateConfirm3 = lxcDomainMigrateConfirm3, /* 1.2.22 */
 };
 
 static virConnectDriver lxcConnectDriver = {
