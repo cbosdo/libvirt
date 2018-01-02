@@ -78,6 +78,7 @@
 #include "viraccessapichecklxc.h"
 #include "virhostdev.h"
 #include "netdev_bandwidth_conf.h"
+#include "domain_stats.h"
 
 #define VIR_FROM_THIS VIR_FROM_LXC
 
@@ -2397,7 +2398,7 @@ lxcDomainBlockStatsFlags(virDomainPtr dom,
     int tmp, ret = -1;
     virDomainObjPtr vm;
     virTypedParameterPtr param;
-    virDomainBlockStatsStruct stats { 0 };
+    virDomainBlockStatsStruct stats = { 0 };
 
     virCheckFlags(VIR_TYPED_PARAM_STRING_OKAY, -1);
 
@@ -5378,6 +5379,248 @@ lxcDomainHasManagedSaveImage(virDomainPtr dom, unsigned int flags)
 }
 
 
+static int
+lxcDomainGetStatsState(virLXCDriverPtr driver ATTRIBUTE_UNUSED,
+                       virDomainObjPtr dom,
+                       virDomainStatsRecordPtr record,
+                       int *maxparams)
+{
+    return virDomainStatsGetState(dom, record, maxparams);
+}
+
+
+static int
+lxcDomainGetStatsCpu(virLXCDriverPtr driver ATTRIBUTE_UNUSED,
+                     virDomainObjPtr dom,
+                     virDomainStatsRecordPtr record,
+                     int *maxparams)
+{
+    virLXCDomainObjPrivatePtr priv = dom->privateData;
+    return virCgroupGetStatsCpu(priv->cgroup, record, maxparams);
+}
+
+
+static int
+lxcDomainGetStatsInterface(virLXCDriverPtr driver ATTRIBUTE_UNUSED,
+                           virDomainObjPtr dom,
+                           virDomainStatsRecordPtr record,
+                           int *maxparams)
+{
+    return virDomainStatsGetInterface(dom, record, maxparams);
+}
+
+
+/* expects a LL, but typed parameter must be ULL */
+#define LXC_ADD_BLOCK_PARAM_LL(record, maxparams, name, value) \
+    do { \
+        char param_name[VIR_TYPED_PARAM_FIELD_LENGTH]; \
+        snprintf(param_name, VIR_TYPED_PARAM_FIELD_LENGTH, \
+                 "block.cgroup.%s", name); \
+        if (virTypedParamsAddULLong(&(record)->params, \
+                                    &(record)->nparams, \
+                                    maxparams, \
+                                    param_name, \
+                                    value) < 0) \
+            goto cleanup; \
+    } while (0)
+
+
+static int
+lxcDomainGetStatsBlock(virLXCDriverPtr driver,
+                       virDomainObjPtr dom,
+                       virDomainStatsRecordPtr record,
+                       int *maxparams)
+{
+    virDomainBlockStatsStruct stats = { 0 };
+
+    int ret = lxcDomainBlockStatsInternal(driver, dom, "",
+                                          &stats);
+
+    LXC_ADD_BLOCK_PARAM_LL(record, maxparams,
+                           "rd.reqs", stats.rd_req);
+    LXC_ADD_BLOCK_PARAM_LL(record, maxparams,
+                           "rd.bytes", stats.rd_bytes);
+    LXC_ADD_BLOCK_PARAM_LL(record, maxparams,
+                           "wr.reqs", stats.wr_req);
+    LXC_ADD_BLOCK_PARAM_LL(record, maxparams,
+                           "wr.bytes", stats.wr_bytes);
+
+ cleanup:
+    return ret;
+}
+
+
+#undef LXC_ADD_BLOCK_PARAM_ULL
+
+
+typedef int
+(*lxcDomainGetStatsFunc)(virLXCDriverPtr driver,
+                         virDomainObjPtr dom,
+                         virDomainStatsRecordPtr record,
+                         int *maxparams);
+
+
+struct lxcDomainGetStatsWorker {
+    lxcDomainGetStatsFunc func;
+    unsigned int stats;
+};
+
+
+static struct lxcDomainGetStatsWorker lxcDomainGetStatsWorkers[] = {
+    { lxcDomainGetStatsState, VIR_DOMAIN_STATS_STATE },
+    { lxcDomainGetStatsCpu, VIR_DOMAIN_STATS_CPU_TOTAL },
+    { lxcDomainGetStatsInterface, VIR_DOMAIN_STATS_INTERFACE },
+    { lxcDomainGetStatsBlock, VIR_DOMAIN_STATS_BLOCK },
+    { NULL, 0 }
+};
+
+
+static int
+lxcDomainGetStatsCheckSupport(unsigned int *stats,
+                              bool enforce)
+{
+    unsigned int supportedstats = 0;
+    size_t i;
+
+    for (i = 0; lxcDomainGetStatsWorkers[i].func; i++)
+        supportedstats |= lxcDomainGetStatsWorkers[i].stats;
+
+    if (*stats == 0) {
+        *stats = supportedstats;
+        return 0;
+    }
+
+    if (enforce &&
+        *stats & ~supportedstats) {
+        virReportError(VIR_ERR_ARGUMENT_UNSUPPORTED,
+                       _("Stats types bits 0x%x are not supported by this daemon"),
+                       *stats & ~supportedstats);
+        return -1;
+    }
+
+    *stats &= supportedstats;
+    return 0;
+}
+
+
+static int
+lxcDomainGetStats(virConnectPtr conn,
+                  virDomainObjPtr dom,
+                  unsigned int stats,
+                  virDomainStatsRecordPtr *record)
+{
+    virLXCDriverPtr driver = conn->privateData;
+    int maxparams = 0;
+    virDomainStatsRecordPtr tmp;
+    size_t i;
+    int ret = -1;
+
+    if (VIR_ALLOC(tmp) < 0)
+        goto cleanup;
+
+    for (i = 0; lxcDomainGetStatsWorkers[i].func; i++) {
+        if (stats & lxcDomainGetStatsWorkers[i].stats) {
+            if (lxcDomainGetStatsWorkers[i].func(driver, dom, tmp, &maxparams) < 0)
+                goto cleanup;
+        }
+    }
+
+    if (!(tmp->dom = virGetDomain(conn, dom->def->name,
+                                  dom->def->uuid, dom->def->id)))
+        goto cleanup;
+
+    *record = tmp;
+    tmp = NULL;
+    ret = 0;
+
+ cleanup:
+    if (tmp) {
+        virTypedParamsFree(tmp->params, tmp->nparams);
+        VIR_FREE(tmp);
+    }
+
+    return ret;
+}
+
+
+static int
+lxcConnectGetAllDomainStats(virConnectPtr conn,
+                            virDomainPtr *doms,
+                            unsigned int ndoms,
+                            unsigned int stats,
+                            virDomainStatsRecordPtr **retStats,
+                            unsigned int flags)
+{
+    virLXCDriverPtr driver = conn->privateData;
+    virDomainObjPtr *vms = NULL;
+    virDomainObjPtr vm;
+    size_t nvms;
+    virDomainStatsRecordPtr *tmpstats = NULL;
+    bool enforce = !!(flags & VIR_CONNECT_GET_ALL_DOMAINS_STATS_ENFORCE_STATS);
+    int nstats = 0;
+    size_t i;
+    int ret = -1;
+    unsigned int lflags = flags & (VIR_CONNECT_LIST_DOMAINS_FILTERS_ACTIVE |
+                                   VIR_CONNECT_LIST_DOMAINS_FILTERS_PERSISTENT |
+                                   VIR_CONNECT_LIST_DOMAINS_FILTERS_STATE);
+
+    virCheckFlags(VIR_CONNECT_LIST_DOMAINS_FILTERS_ACTIVE |
+                  VIR_CONNECT_LIST_DOMAINS_FILTERS_PERSISTENT |
+                  VIR_CONNECT_LIST_DOMAINS_FILTERS_STATE, -1);
+
+    if (virConnectGetAllDomainStatsEnsureACL(conn) < 0)
+        return -1;
+
+    /* TODO Check stats support */
+    if (lxcDomainGetStatsCheckSupport(&stats, enforce) < 0)
+        return -1;
+
+
+    if (ndoms) {
+        if (virDomainObjListConvert(driver->domains, conn, doms, ndoms, &vms,
+                                    &nvms, virConnectGetAllDomainStatsCheckACL,
+                                    lflags, true) < 0)
+            return -1;
+    } else {
+        if (virDomainObjListCollect(driver->domains, conn, &vms, &nvms,
+                                    virConnectGetAllDomainStatsCheckACL,
+                                    lflags) < 0)
+            return -1;
+    }
+
+    if (VIR_ALLOC_N(tmpstats, nvms + 1) < 0)
+        return -1;
+
+    for (i = 0; i < nvms; i++) {
+        virDomainStatsRecordPtr tmp = NULL;
+        vm = vms[i];
+
+        virObjectLock(vm);
+
+        if (lxcDomainGetStats(conn, vm, stats, &tmp) < 0) {
+            virObjectUnlock(vm);
+            goto cleanup;
+        }
+
+        if (tmp)
+            tmpstats[nstats++] = tmp;
+
+        virObjectUnlock(vm);
+    }
+
+    *retStats = tmpstats;
+    tmpstats = NULL;
+
+    ret = nstats;
+
+ cleanup:
+    virDomainStatsRecordListFree(tmpstats);
+    virObjectListFreeCount(vms, nvms);
+
+    return ret;
+}
+
+
 /* Function Tables */
 static virHypervisorDriver lxcHypervisorDriver = {
     .name = LXC_DRIVER_NAME,
@@ -5472,6 +5715,7 @@ static virHypervisorDriver lxcHypervisorDriver = {
     .nodeGetFreePages = lxcNodeGetFreePages, /* 1.2.6 */
     .nodeAllocPages = lxcNodeAllocPages, /* 1.2.9 */
     .domainHasManagedSaveImage = lxcDomainHasManagedSaveImage, /* 1.2.13 */
+    .connectGetAllDomainStats = lxcConnectGetAllDomainStats, /* 4.2.0 */
 };
 
 static virConnectDriver lxcConnectDriver = {

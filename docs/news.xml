@@ -100,6 +100,15 @@
           guests on ppc64 hardware.
         </description>
       </change>
+      <change>
+        <summary>
+          lxc: Implement connectGetAllDomainStats
+        </summary>
+        <description>
+          Provide some statistics from lxc containers by implementing the
+          connectGetAllDomainStats API for the lxc driver.
+        </description>
+      </change>
     </section>
     <section title="Improvements">
     </section>
