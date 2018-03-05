@@ -2300,26 +2300,19 @@ lxcDomainMergeBlkioDevice(virBlkioDevicePtr *dest_array,
 
 
 static int
-lxcDomainBlockStats(virDomainPtr dom,
-                    const char *path,
-                    virDomainBlockStatsPtr stats)
+lxcDomainBlockStatsInternal(virLXCDriverPtr driver,
+                            virDomainObjPtr vm,
+                            const char *path,
+                            virDomainBlockStatsPtr stats)
 {
-    virLXCDriverPtr driver = dom->conn->privateData;
     int ret = -1;
-    virDomainObjPtr vm;
     virDomainDiskDefPtr disk = NULL;
     virLXCDomainObjPrivatePtr priv;
 
-    if (!(vm = lxcDomObjFromDomain(dom)))
-        return ret;
-
     priv = vm->privateData;
 
-    if (virDomainBlockStatsEnsureACL(dom->conn, vm->def) < 0)
-        goto cleanup;
-
    if (virLXCDomainObjBeginJob(driver, vm, LXC_JOB_QUERY) < 0)
-        goto cleanup;
+        return -1;
 
     if (virDomainObjCheckActive(vm) < 0)
         goto endjob;
@@ -2337,6 +2330,9 @@ lxcDomainBlockStats(virDomainPtr dom,
                                           &stats->wr_bytes,
                                           &stats->rd_req,
                                           &stats->wr_req);
+        if (ret < 0)
+            virReportError(VIR_ERR_INTERNAL_ERROR,
+                           "%s", _("domain stats query failed"));
         goto endjob;
     }
 
@@ -2352,15 +2348,37 @@ lxcDomainBlockStats(virDomainPtr dom,
         goto endjob;
     }
 
-    ret = virCgroupGetBlkioIoDeviceServiced(priv->cgroup,
+    if ((ret = virCgroupGetBlkioIoDeviceServiced(priv->cgroup,
                                             disk->info.alias,
                                             &stats->rd_bytes,
                                             &stats->wr_bytes,
                                             &stats->rd_req,
-                                            &stats->wr_req);
+                                            &stats->wr_req)) < 0)
+        virReportError(VIR_ERR_INTERNAL_ERROR,
+                       "%s", _("domain stats query failed"));
 
  endjob:
     virLXCDomainObjEndJob(driver, vm);
+    return ret;
+}
+
+
+static int
+lxcDomainBlockStats(virDomainPtr dom,
+                    const char *path,
+                    virDomainBlockStatsPtr stats)
+{
+    virLXCDriverPtr driver = dom->conn->privateData;
+    virDomainObjPtr vm;
+    int ret = -1;
+
+    if (!(vm = lxcDomObjFromDomain(dom)))
+        return -1;
+
+    if (virDomainBlockStatsEnsureACL(dom->conn, vm->def) < 0)
+        goto cleanup;
+
+    ret = lxcDomainBlockStatsInternal(driver, vm, path, stats);
 
  cleanup:
     virDomainObjEndAPI(&vm);
@@ -2370,18 +2388,16 @@ lxcDomainBlockStats(virDomainPtr dom,
 
 static int
 lxcDomainBlockStatsFlags(virDomainPtr dom,
-                         const char * path,
+                         const char *path,
                          virTypedParameterPtr params,
-                         int * nparams,
+                         int *nparams,
                          unsigned int flags)
 {
     virLXCDriverPtr driver = dom->conn->privateData;
     int tmp, ret = -1;
     virDomainObjPtr vm;
-    virDomainDiskDefPtr disk = NULL;
-    virLXCDomainObjPrivatePtr priv;
-    long long rd_req, rd_bytes, wr_req, wr_bytes;
     virTypedParameterPtr param;
+    virDomainBlockStatsStruct stats { 0 };
 
     virCheckFlags(VIR_TYPED_PARAM_STRING_OKAY, -1);
 
@@ -2396,99 +2412,50 @@ lxcDomainBlockStatsFlags(virDomainPtr dom,
     if (!(vm = lxcDomObjFromDomain(dom)))
         return ret;
 
-    priv = vm->privateData;
-
     if (virDomainBlockStatsFlagsEnsureACL(dom->conn, vm->def) < 0)
         goto cleanup;
 
-    if (virLXCDomainObjBeginJob(driver, vm, LXC_JOB_QUERY) < 0)
+    if (lxcDomainBlockStatsInternal(driver, vm, path,
+                                    &stats) < 0)
         goto cleanup;
-
-    if (virDomainObjCheckActive(vm) < 0)
-        goto endjob;
-
-    if (!virCgroupHasController(priv->cgroup, VIR_CGROUP_CONTROLLER_BLKIO)) {
-        virReportError(VIR_ERR_OPERATION_INVALID, "%s",
-                       _("blkio cgroup isn't mounted"));
-        goto endjob;
-    }
-
-    if (!*path) {
-        /* empty path - return entire domain blkstats instead */
-        if (virCgroupGetBlkioIoServiced(priv->cgroup,
-                                        &rd_bytes,
-                                        &wr_bytes,
-                                        &rd_req,
-                                        &wr_req) < 0) {
-            virReportError(VIR_ERR_INTERNAL_ERROR,
-                           "%s", _("domain stats query failed"));
-            goto endjob;
-        }
-    } else {
-        if (!(disk = virDomainDiskByName(vm->def, path, false))) {
-            virReportError(VIR_ERR_INVALID_ARG,
-                           _("invalid path: %s"), path);
-            goto endjob;
-        }
-
-        if (!disk->info.alias) {
-            virReportError(VIR_ERR_INTERNAL_ERROR,
-                           _("missing disk device alias name for %s"), disk->dst);
-            goto endjob;
-        }
-
-        if (virCgroupGetBlkioIoDeviceServiced(priv->cgroup,
-                                              disk->info.alias,
-                                              &rd_bytes,
-                                              &wr_bytes,
-                                              &rd_req,
-                                              &wr_req) < 0) {
-            virReportError(VIR_ERR_INTERNAL_ERROR,
-                           "%s", _("domain stats query failed"));
-            goto endjob;
-        }
-    }
 
     tmp = 0;
     ret = -1;
 
-    if (tmp < *nparams && wr_bytes != -1) {
+    if (tmp < *nparams && stats.wr_bytes != -1) {
         param = &params[tmp];
         if (virTypedParameterAssign(param, VIR_DOMAIN_BLOCK_STATS_WRITE_BYTES,
-                                    VIR_TYPED_PARAM_LLONG, wr_bytes) < 0)
-            goto endjob;
+                                    VIR_TYPED_PARAM_LLONG, stats.wr_bytes) < 0)
+            goto cleanup;
         tmp++;
     }
 
-    if (tmp < *nparams && wr_req != -1) {
+    if (tmp < *nparams && stats.wr_req != -1) {
         param = &params[tmp];
         if (virTypedParameterAssign(param, VIR_DOMAIN_BLOCK_STATS_WRITE_REQ,
-                                    VIR_TYPED_PARAM_LLONG, wr_req) < 0)
-            goto endjob;
+                                    VIR_TYPED_PARAM_LLONG, stats.wr_req) < 0)
+            goto cleanup;
         tmp++;
     }
 
-    if (tmp < *nparams && rd_bytes != -1) {
+    if (tmp < *nparams && stats.rd_bytes != -1) {
         param = &params[tmp];
         if (virTypedParameterAssign(param, VIR_DOMAIN_BLOCK_STATS_READ_BYTES,
-                                    VIR_TYPED_PARAM_LLONG, rd_bytes) < 0)
-            goto endjob;
+                                    VIR_TYPED_PARAM_LLONG, stats.rd_bytes) < 0)
+            goto cleanup;
         tmp++;
     }
 
-    if (tmp < *nparams && rd_req != -1) {
+    if (tmp < *nparams && stats.rd_req != -1) {
         param = &params[tmp];
         if (virTypedParameterAssign(param, VIR_DOMAIN_BLOCK_STATS_READ_REQ,
-                                    VIR_TYPED_PARAM_LLONG, rd_req) < 0)
-            goto endjob;
+                                    VIR_TYPED_PARAM_LLONG, stats.rd_req) < 0)
+            goto cleanup;
         tmp++;
     }
 
     ret = 0;
     *nparams = tmp;
-
- endjob:
-    virLXCDomainObjEndJob(driver, vm);
 
  cleanup:
     virDomainObjEndAPI(&vm);
