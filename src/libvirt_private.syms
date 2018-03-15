@@ -1552,6 +1552,7 @@ virCgroupGetMemoryUsage;
 virCgroupGetMemSwapHardLimit;
 virCgroupGetMemSwapUsage;
 virCgroupGetPercpuStats;
+virCgroupGetStatsCpu;
 virCgroupHasController;
 virCgroupHasEmptyTasks;
 virCgroupKillPainfully;

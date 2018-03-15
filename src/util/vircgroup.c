@@ -2794,6 +2794,45 @@ virCgroupControllerAvailable(int controller)
     return ret;
 }
 
+
+int
+virCgroupGetStatsCpu(virCgroupPtr cgroup,
+                     virDomainStatsRecordPtr record,
+                     int *maxparams)
+{
+    unsigned long long cpu_time = 0;
+    unsigned long long user_time = 0;
+    unsigned long long sys_time = 0;
+    int err = 0;
+
+    if (!cgroup)
+        return 0;
+
+    err = virCgroupGetCpuacctUsage(cgroup, &cpu_time);
+    if (!err && virTypedParamsAddULLong(&record->params,
+                                        &record->nparams,
+                                        maxparams,
+                                        "cpu.time",
+                                        cpu_time) < 0)
+        return -1;
+
+    err = virCgroupGetCpuacctStat(cgroup, &user_time, &sys_time);
+    if (!err && virTypedParamsAddULLong(&record->params,
+                                        &record->nparams,
+                                        maxparams,
+                                        "cpu.user",
+                                        user_time) < 0)
+        return -1;
+    if (!err && virTypedParamsAddULLong(&record->params,
+                                        &record->nparams,
+                                        maxparams,
+                                        "cpu.system",
+                                        sys_time) < 0)
+        return -1;
+
+    return 0;
+}
+
 #else /* !__linux__ */
 
 bool
@@ -3554,6 +3593,14 @@ bool
 virCgroupControllerAvailable(int controller ATTRIBUTE_UNUSED)
 {
     return false;
+}
+
+int
+virCgroupGetStatsCpu(virCgroupPtr cgroup,
+                     virDomainStatsRecordPtr record,
+                     int *maxparams)
+{
+    return 0;
 }
 #endif /* !__linux__ */
 
