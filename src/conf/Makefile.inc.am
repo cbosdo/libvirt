@@ -20,6 +20,8 @@ DOMAIN_CONF_SOURCES = \
 	conf/domain_audit.h \
 	conf/domain_nwfilter.c \
 	conf/domain_nwfilter.h \
+	conf/domain_stats.c \
+	conf/domain_stats.h \
 	conf/virsavecookie.c \
 	conf/virsavecookie.h \
 	conf/snapshot_conf.c \

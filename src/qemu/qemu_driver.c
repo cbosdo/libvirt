@@ -69,6 +69,7 @@
 #include "virarptable.h"
 #include "viruuid.h"
 #include "domain_conf.h"
+#include "domain_stats.h"
 #include "domain_audit.h"
 #include "node_device_conf.h"
 #include "virpci.h"
@@ -19900,21 +19901,7 @@ qemuDomainGetStatsState(virQEMUDriverPtr driver ATTRIBUTE_UNUSED,
                         int *maxparams,
                         unsigned int privflags ATTRIBUTE_UNUSED)
 {
-    if (virTypedParamsAddInt(&record->params,
-                             &record->nparams,
-                             maxparams,
-                             "state.state",
-                             dom->state.state) < 0)
-        return -1;
-
-    if (virTypedParamsAddInt(&record->params,
-                             &record->nparams,
-                             maxparams,
-                             "state.reason",
-                             dom->state.reason) < 0)
-        return -1;
-
-    return 0;
+    return virDomainStatsGetState(dom, record, maxparams);
 }
 
 

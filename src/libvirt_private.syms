@@ -658,6 +658,8 @@ virDomainConfNWFilterInstantiate;
 virDomainConfNWFilterTeardown;
 virDomainConfVMNWFilterTeardown;
 
+# conf/domain_stats.h
+virDomainStatsGetState;
 
 # conf/interface_conf.h
 virInterfaceDefFormat;
