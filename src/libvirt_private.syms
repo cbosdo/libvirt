@@ -659,6 +659,9 @@ virDomainConfNWFilterTeardown;
 virDomainConfVMNWFilterTeardown;
 
 # conf/domain_stats.h
+virDomainStatsAddCountParam;
+virDomainStatsAddNameParam;
+virDomainStatsGetInterface;
 virDomainStatsGetState;
 
 # conf/interface_conf.h

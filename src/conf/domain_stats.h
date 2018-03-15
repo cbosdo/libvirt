@@ -28,8 +28,24 @@
 # include "domain_conf.h"
 
 
+int virDomainStatsAddCountParam(virDomainStatsRecordPtr record,
+                                int *maxparams,
+                                const char *type,
+                                unsigned int count);
+
+int virDomainStatsAddNameParam(virDomainStatsRecordPtr record,
+                               int *maxparams,
+                               const char *type,
+                               const char *subtype,
+                               size_t num,
+                               const char *name);
+
 int virDomainStatsGetState(virDomainObjPtr dom,
                            virDomainStatsRecordPtr record,
                            int *maxparams);
+
+int virDomainStatsGetInterface(virDomainObjPtr dom,
+                               virDomainStatsRecordPtr record,
+                               int *maxparams);
 
 #endif /* __DOMAIN_STATS_H */

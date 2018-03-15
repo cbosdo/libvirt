@@ -20319,44 +20319,6 @@ qemuDomainGetStatsVcpu(virQEMUDriverPtr driver,
     return ret;
 }
 
-#define QEMU_ADD_COUNT_PARAM(record, maxparams, type, count) \
-do { \
-    char param_name[VIR_TYPED_PARAM_FIELD_LENGTH]; \
-    snprintf(param_name, VIR_TYPED_PARAM_FIELD_LENGTH, "%s.count", type); \
-    if (virTypedParamsAddUInt(&(record)->params, \
-                              &(record)->nparams, \
-                              maxparams, \
-                              param_name, \
-                              count) < 0) \
-        goto cleanup; \
-} while (0)
-
-#define QEMU_ADD_NAME_PARAM(record, maxparams, type, subtype, num, name) \
-do { \
-    char param_name[VIR_TYPED_PARAM_FIELD_LENGTH]; \
-    snprintf(param_name, VIR_TYPED_PARAM_FIELD_LENGTH, \
-             "%s.%zu.%s", type, num, subtype); \
-    if (virTypedParamsAddString(&(record)->params, \
-                                &(record)->nparams, \
-                                maxparams, \
-                                param_name, \
-                                name) < 0) \
-        goto cleanup; \
-} while (0)
-
-#define QEMU_ADD_NET_PARAM(record, maxparams, num, name, value) \
-do { \
-    char param_name[VIR_TYPED_PARAM_FIELD_LENGTH]; \
-    snprintf(param_name, VIR_TYPED_PARAM_FIELD_LENGTH, \
-             "net.%zu.%s", num, name); \
-    if (value >= 0 && virTypedParamsAddULLong(&(record)->params, \
-                                              &(record)->nparams, \
-                                              maxparams, \
-                                              param_name, \
-                                              value) < 0) \
-        return -1; \
-} while (0)
-
 static int
 qemuDomainGetStatsInterface(virQEMUDriverPtr driver ATTRIBUTE_UNUSED,
                             virDomainObjPtr dom,
@@ -20364,67 +20326,8 @@ qemuDomainGetStatsInterface(virQEMUDriverPtr driver ATTRIBUTE_UNUSED,
                             int *maxparams,
                             unsigned int privflags ATTRIBUTE_UNUSED)
 {
-    size_t i;
-    struct _virDomainInterfaceStats tmp;
-    int ret = -1;
-
-    if (!virDomainObjIsActive(dom))
-        return 0;
-
-    QEMU_ADD_COUNT_PARAM(record, maxparams, "net", dom->def->nnets);
-
-    /* Check the path is one of the domain's network interfaces. */
-    for (i = 0; i < dom->def->nnets; i++) {
-        virDomainNetDefPtr net = dom->def->nets[i];
-        virDomainNetType actualType;
-
-        if (!net->ifname)
-            continue;
-
-        memset(&tmp, 0, sizeof(tmp));
-
-        actualType = virDomainNetGetActualType(net);
-
-        QEMU_ADD_NAME_PARAM(record, maxparams,
-                            "net", "name", i, net->ifname);
-
-        if (actualType == VIR_DOMAIN_NET_TYPE_VHOSTUSER) {
-            if (virNetDevOpenvswitchInterfaceStats(net->ifname, &tmp) < 0) {
-                virResetLastError();
-                continue;
-            }
-        } else {
-            if (virNetDevTapInterfaceStats(net->ifname, &tmp,
-                                           !virDomainNetTypeSharesHostView(net)) < 0) {
-                virResetLastError();
-                continue;
-            }
-        }
-
-        QEMU_ADD_NET_PARAM(record, maxparams, i,
-                           "rx.bytes", tmp.rx_bytes);
-        QEMU_ADD_NET_PARAM(record, maxparams, i,
-                           "rx.pkts", tmp.rx_packets);
-        QEMU_ADD_NET_PARAM(record, maxparams, i,
-                           "rx.errs", tmp.rx_errs);
-        QEMU_ADD_NET_PARAM(record, maxparams, i,
-                           "rx.drop", tmp.rx_drop);
-        QEMU_ADD_NET_PARAM(record, maxparams, i,
-                           "tx.bytes", tmp.tx_bytes);
-        QEMU_ADD_NET_PARAM(record, maxparams, i,
-                           "tx.pkts", tmp.tx_packets);
-        QEMU_ADD_NET_PARAM(record, maxparams, i,
-                           "tx.errs", tmp.tx_errs);
-        QEMU_ADD_NET_PARAM(record, maxparams, i,
-                           "tx.drop", tmp.tx_drop);
-    }
-
-    ret = 0;
- cleanup:
-    return ret;
+    return virDomainStatsGetInterface(dom, record, maxparams);
 }
-
-#undef QEMU_ADD_NET_PARAM
 
 #define QEMU_ADD_BLOCK_PARAM_UI(record, maxparams, num, name, value) \
     do { \
@@ -20658,10 +20561,13 @@ qemuDomainGetStatsBlockExportHeader(virDomainDiskDefPtr disk,
 {
     int ret = -1;
 
-    QEMU_ADD_NAME_PARAM(records, nrecords, "block", "name", recordnr, disk->dst);
+    if (virDomainStatsAddNameParam(records, nrecords, "block", "name", recordnr, disk->dst) < 0)
+		goto cleanup;
 
-    if (virStorageSourceIsLocalStorage(src) && src->path)
-        QEMU_ADD_NAME_PARAM(records, nrecords, "block", "path", recordnr, src->path);
+    if (virStorageSourceIsLocalStorage(src) && src->path &&
+        virDomainStatsAddNameParam(records, nrecords, "block", "path", recordnr, src->path) < 0)
+		goto cleanup;
+
     if (src->id)
         QEMU_ADD_BLOCK_PARAM_UI(records, nrecords, recordnr, "backingIndex",
                                 src->id);
@@ -20801,7 +20707,8 @@ qemuDomainGetStatsBlock(virQEMUDriverPtr driver,
      * after the iteration than it is to iterate twice; but we still
      * want count listed first.  */
     count_index = record->nparams;
-    QEMU_ADD_COUNT_PARAM(record, maxparams, "block", 0);
+    if (virDomainStatsAddCountParam(record, maxparams, "block", 0) < 0)
+        goto cleanup;
 
     for (i = 0; i < dom->def->ndisks; i++) {
         if (qemuDomainGetStatsBlockExportDisk(dom->def->disks[i], stats, nodestats,
@@ -20825,8 +20732,6 @@ qemuDomainGetStatsBlock(virQEMUDriverPtr driver,
 #undef QEMU_ADD_BLOCK_PARAM_LL
 
 #undef QEMU_ADD_BLOCK_PARAM_ULL
-
-#undef QEMU_ADD_NAME_PARAM
 
 #define QEMU_ADD_IOTHREAD_PARAM_UI(record, maxparams, id, name, value) \
     do { \
@@ -20875,7 +20780,8 @@ qemuDomainGetStatsIOThread(virQEMUDriverPtr driver,
     if (niothreads == 0)
         return 0;
 
-    QEMU_ADD_COUNT_PARAM(record, maxparams, "iothread", niothreads);
+    if (virDomainStatsAddCountParam(record, maxparams, "iothread", niothreads) < 0)
+        goto cleanup;
 
     for (i = 0; i < niothreads; i++) {
         if (iothreads[i]->poll_valid) {
@@ -20907,8 +20813,6 @@ qemuDomainGetStatsIOThread(virQEMUDriverPtr driver,
 #undef QEMU_ADD_IOTHREAD_PARAM_UI
 
 #undef QEMU_ADD_IOTHREAD_PARAM_ULL
-
-#undef QEMU_ADD_COUNT_PARAM
 
 static int
 qemuDomainGetStatsPerfOneEvent(virPerfPtr perf,
